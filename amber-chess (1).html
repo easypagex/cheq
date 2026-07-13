@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>QUEEN'S GAMBIT.EXE — Amber Chess</title>
+<style>
+  :root{
+    --amber: #ffb000;
+    --amber-dim: #995e00;
+    --amber-glow: #ffcf66;
+    --bg: #000000;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg);
+    color:var(--amber);
+    font-family:'Courier New', Courier, monospace;
+    overflow-x:hidden;
+  }
+  /* CRT scanline + flicker overlay */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    pointer-events:none;
+    z-index:50;
+    background:repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.0) 0px,
+      rgba(0,0,0,0.15) 1px,
+      rgba(0,0,0,0.0) 2px
+    );
+    mix-blend-mode:multiply;
+  }
+  body::after{
+    content:"";
+    position:fixed; inset:0;
+    pointer-events:none;
+    z-index:51;
+    background:radial-gradient(ellipse at center, rgba(255,176,0,0.05) 0%, rgba(0,0,0,0.35) 100%);
+    animation:flicker 4.5s infinite;
+  }
+  @keyframes flicker{
+    0%,100%{ opacity:1; }
+    92%{ opacity:1; }
+    93%{ opacity:0.85; }
+    94%{ opacity:1; }
+    97%{ opacity:0.92; }
+    98%{ opacity:1; }
+  }
+
+  .crt-wrap{
+    max-width:760px;
+    margin:0 auto;
+    padding:28px 16px 60px;
+    position:relative;
+    z-index:1;
+  }
+
+  .boot-line{
+    font-size:12px;
+    color:var(--amber-dim);
+    letter-spacing:1px;
+    margin-bottom:4px;
+  }
+
+  h1{
+    font-size:26px;
+    letter-spacing:4px;
+    margin:6px 0 2px;
+    text-shadow:0 0 6px var(--amber), 0 0 14px var(--amber);
+  }
+  .cursor{
+    display:inline-block;
+    width:12px; height:20px;
+    background:var(--amber);
+    box-shadow:0 0 8px var(--amber);
+    margin-left:6px;
+    vertical-align:middle;
+    animation:blink 1s steps(1) infinite;
+  }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  .subtitle{
+    font-size:12px;
+    color:var(--amber-dim);
+    margin-bottom:20px;
+    letter-spacing:2px;
+  }
+
+  .rule-box{
+    border:1px solid var(--amber-dim);
+    padding:10px 14px;
+    font-size:12px;
+    line-height:1.6;
+    margin-bottom:20px;
+    color:var(--amber);
+    box-shadow: inset 0 0 12px rgba(255,176,0,0.06);
+  }
+  .rule-box b{ color:var(--amber-glow); }
+
+  .status-line{
+    font-size:14px;
+    letter-spacing:1px;
+    margin-bottom:12px;
+    min-height:20px;
+    text-shadow:0 0 6px var(--amber);
+  }
+  .status-line.win{
+    color:var(--amber-glow);
+    text-shadow:0 0 10px var(--amber), 0 0 22px var(--amber);
+  }
+
+  .board-frame{
+    display:inline-block;
+    border:2px solid var(--amber);
+    box-shadow:0 0 4px var(--amber), 0 0 22px rgba(255,176,0,0.25), inset 0 0 20px rgba(255,176,0,0.05);
+    padding:6px;
+    background:#000;
+  }
+  .board{
+    display:grid;
+    grid-template-columns:repeat(8, 52px);
+    grid-template-rows:repeat(8, 52px);
+  }
+  .sq{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:34px;
+    line-height:1;
+    position:relative;
+    overflow:hidden;
+    border:1px solid rgba(255,176,0,0.12);
+  }
+  .sq.light{ background:rgba(255,176,0,0.055); }
+  .sq.dark{ background:rgba(255,176,0,0.0); }
+  .sq.from{ box-shadow:inset 0 0 0 2px var(--amber-glow); }
+  .sq.to{ box-shadow:inset 0 0 0 2px var(--amber-glow), 0 0 10px var(--amber-glow); }
+
+  .piece{
+    user-select:none;
+    position:relative;
+    z-index:2;
+  }
+  /* WHITE side: bright pale-yellow phosphor */
+  .piece.side-w{
+    color:#fff2c0;
+    text-shadow:0 0 4px #fff2c0, 0 0 10px #ffe066, 0 0 18px #ffb000;
+  }
+  .piece.side-w.king{
+    color:#ffffff;
+    text-shadow:0 0 6px #ffffff, 0 0 16px #ffe066, 0 0 30px #ffb000;
+  }
+  /* BLACK side: deep burnt-amber/red phosphor */
+  .piece.side-b{
+    color:#ff7300;
+    text-shadow:0 0 4px #ff7300, 0 0 10px #cc3a00, 0 0 16px #7a1f00;
+  }
+  .piece.side-b.king{
+    color:#ff9d33;
+    text-shadow:0 0 6px #ff7300, 0 0 16px #cc3a00, 0 0 28px #7a1f00;
+  }
+  .sq.white-owned::before{
+    content:"";
+    position:absolute; inset:8px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(255,242,192,0.10) 0%, rgba(255,242,192,0) 70%);
+    z-index:1;
+  }
+  .sq.black-owned::before{
+    content:"";
+    position:absolute; inset:8px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(255,115,0,0.10) 0%, rgba(255,115,0,0) 70%);
+    z-index:1;
+  }
+
+  .coords{
+    display:flex;
+    justify-content:space-between;
+    width:calc(52px * 8);
+    font-size:10px;
+    color:var(--amber-dim);
+    margin-top:4px;
+    letter-spacing:1px;
+  }
+
+  .controls{
+    margin-top:22px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  button{
+    font-family:inherit;
+    background:#000;
+    color:var(--amber);
+    border:1px solid var(--amber);
+    padding:9px 16px;
+    font-size:12px;
+    letter-spacing:1.5px;
+    cursor:pointer;
+    text-shadow:0 0 4px var(--amber);
+    box-shadow:0 0 4px rgba(255,176,0,0.3);
+    transition:background 0.12s, color 0.12s;
+  }
+  button:hover{
+    background:var(--amber);
+    color:#000;
+    text-shadow:none;
+  }
+  button.active{
+    background:var(--amber);
+    color:#000;
+    text-shadow:none;
+    box-shadow:0 0 12px var(--amber);
+  }
+  button.easypage{
+    border-color:var(--amber-glow);
+    color:var(--amber-glow);
+  }
+  button.easypage:hover{
+    background:var(--amber-glow);
+    color:#000;
+  }
+
+  .log-wrap{
+    margin-top:22px;
+  }
+  .log-title{
+    font-size:11px;
+    color:var(--amber-dim);
+    letter-spacing:2px;
+    margin-bottom:6px;
+  }
+  .log{
+    border:1px solid var(--amber-dim);
+    height:150px;
+    overflow-y:auto;
+    padding:8px 10px;
+    font-size:12px;
+    line-height:1.5;
+    background:rgba(255,176,0,0.02);
+  }
+  .log div{ opacity:0.9; }
+  .log div:last-child{
+    color:var(--amber-glow);
+    text-shadow:0 0 4px var(--amber-glow);
+  }
+
+  .footer-note{
+    margin-top:24px;
+    font-size:11px;
+    color:var(--amber-dim);
+    letter-spacing:1px;
+  }
+
+  ::-webkit-scrollbar{ width:8px; }
+  ::-webkit-scrollbar-track{ background:#000; }
+  ::-webkit-scrollbar-thumb{ background:var(--amber-dim); }
+</style>
+</head>
+<body>
+<div class="crt-wrap">
+  <div class="boot-line">C:\GAMES\CHESS&gt; RUN QUEENSGAMBIT.EXE</div>
+  <h1>ALL-QUEENS CHESS<span class="cursor"></span></h1>
+  <div class="subtitle">IBM-PC · AMBER PHOSPHOR DISPLAY · AUTOPLAY MODE</div>
+
+  <div class="rule-box">
+    HOUSE RULE: every piece is a <b>QUEEN</b> except one <b>KING</b> per side.
+    No checks, no checkmate — a side wins the instant its opponent's
+    king is captured. The machine plays both colors.
+  </div>
+
+  <div class="status-line" id="status">WHITE TO MOVE</div>
+
+  <div class="board-frame">
+    <div class="board" id="board"></div>
+  </div>
+  <div class="coords" id="coords"></div>
+
+  <div class="controls">
+    <button id="playBtn">⏸ PAUSE</button>
+    <button id="turboBtn">⚡ TURBO MODE: OFF</button>
+    <button id="restartBtn">⟲ NEW GAME</button>
+    <button class="easypage" id="easypageBtn">⧉ EASYPAGEX</button>
+  </div>
+
+  <div class="log-wrap">
+    <div class="log-title">MOVE LOG</div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="footer-note">
+    16 pieces. 15 queens. 1 king. Zero mercy. — press TURBO for a faster shootout.
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Game constants ----------
+  const SIZE = 8;
+  const QUEEN_DIRS = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+  const KING_DIRS = QUEEN_DIRS;
+  const FILES = ['a','b','c','d','e','f','g','h'];
+
+  const PIECE_GLYPH = {
+    wK: '\u2654', wQ: '\u2655',
+    bK: '\u265A', bQ: '\u265B'
+  };
+
+  let board, turn, moveCount, gameOver, winner, lastMove;
+  let autoplay = true;
+  let turbo = false;
+  let timer = null;
+
+  // ---------- Retro beep engine ----------
+  let audioCtx = null;
+  function ensureAudio(){
+    if(!audioCtx){
+      try{
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }catch(e){ audioCtx = null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){
+      audioCtx.resume();
+    }
+  }
+
+  function tone(freq, type, dur, vol, delay){
+    if(!audioCtx) return;
+    const t0 = audioCtx.currentTime + (delay||0);
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  // White: bright high-pitched square blip. Black: lower gritty sawtooth blip.
+  function playMoveSound(color, capture){
+    if(color === 'w'){
+      tone(880, 'square', 0.07, 0.14);
+      if(capture) tone(1320, 'square', 0.05, 0.10, 0.05);
+    } else {
+      tone(392, 'sawtooth', 0.10, 0.14);
+      if(capture) tone(262, 'sawtooth', 0.08, 0.10, 0.06);
+    }
+  }
+
+  function playWinFanfare(color){
+    const seq = color === 'w'
+      ? [660,880,1100,1320]
+      : [440,349,294,220];
+    seq.forEach((f,i)=> tone(f, color==='w'?'square':'sawtooth', 0.14, 0.16, i*0.11));
+  }
+
+  function freshBoard(){
+    const b = Array.from({length:SIZE}, () => Array(SIZE).fill(null));
+    for(let c=0;c<SIZE;c++){
+      b[0][c] = { type: c===4 ? 'K':'Q', color:'b' };
+      b[1][c] = { type:'Q', color:'b' };
+      b[6][c] = { type:'Q', color:'w' };
+      b[7][c] = { type: c===4 ? 'K':'Q', color:'w' };
+    }
+    return b;
+  }
+
+  function resetGame(){
+    board = freshBoard();
+    turn = 'w';
+    moveCount = 0;
+    gameOver = false;
+    winner = null;
+    lastMove = null;
+    document.getElementById('log').innerHTML = '';
+    logLine('--- NEW GAME: WHITE vs BLACK ---');
+    setStatus('WHITE TO MOVE', false);
+    render();
+  }
+
+  function inBounds(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE; }
+
+  function cloneBoard(b){
+    const nb = new Array(SIZE);
+    for(let r=0;r<SIZE;r++){
+      nb[r] = new Array(SIZE);
+      for(let c=0;c<SIZE;c++){
+        nb[r][c] = b[r][c] ? { type:b[r][c].type, color:b[r][c].color } : null;
+      }
+    }
+    return nb;
+  }
+
+  function pieceMoves(b, r, c){
+    const p = b[r][c];
+    if(!p) return [];
+    const moves = [];
+    if(p.type === 'Q'){
+      for(const [dr,dc] of QUEEN_DIRS){
+        let nr=r+dr, nc=c+dc;
+        while(inBounds(nr,nc)){
+          const target = b[nr][nc];
+          if(!target){
+            moves.push({fr:r,fc:c,tr:nr,tc:nc,capture:false});
+          } else {
+            if(target.color !== p.color){
+              moves.push({fr:r,fc:c,tr:nr,tc:nc,capture:true, capturedType:target.type});
+            }
+            break;
+          }
+          nr+=dr; nc+=dc;
+        }
+      }
+    } else { // King
+      for(const [dr,dc] of KING_DIRS){
+        const nr=r+dr, nc=c+dc;
+        if(!inBounds(nr,nc)) continue;
+        const target = b[nr][nc];
+        if(!target){
+          moves.push({fr:r,fc:c,tr:nr,tc:nc,capture:false});
+        } else if(target.color !== p.color){
+          moves.push({fr:r,fc:c,tr:nr,tc:nc,capture:true, capturedType:target.type});
+        }
+      }
+    }
+    return moves;
+  }
+
+  function allMoves(b, color){
+    const moves = [];
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        const p = b[r][c];
+        if(p && p.color === color){
+          const ms = pieceMoves(b,r,c);
+          for(const m of ms) moves.push(m);
+        }
+      }
+    }
+    // captures first for better pruning + more decisive play
+    moves.sort((a,c2)=> (c2.capture?1:0) - (a.capture?1:0));
+    return moves;
+  }
+
+  function applyMove(b, m){
+    const nb = cloneBoard(b);
+    nb[m.tr][m.tc] = nb[m.fr][m.fc];
+    nb[m.fr][m.fc] = null;
+    return nb;
+  }
+
+  const VAL = { Q: 9, K: 1000 };
+
+  function evaluate(b){
+    let score = 0;
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        const p = b[r][c];
+        if(!p) continue;
+        const v = VAL[p.type];
+        // tiny centrality bonus to encourage active queens
+        const centrality = (3.5 - Math.abs(3.5-r)) + (3.5 - Math.abs(3.5-c));
+        const s = v + centrality*0.02;
+        score += (p.color === 'w') ? s : -s;
+      }
+    }
+    return score + (Math.random()-0.5)*0.05;
+  }
+
+  function kingCaptured(m){
+    return m.capture && m.capturedType === 'K';
+  }
+
+  function minimax(b, depth, color, alpha, beta){
+    const moves = allMoves(b, color);
+    if(moves.length === 0 || depth === 0){
+      return { score: evaluate(b), move:null };
+    }
+    const other = color === 'w' ? 'b' : 'w';
+    let best = null;
+    if(color === 'w'){
+      let bestScore = -Infinity;
+      for(const m of moves){
+        if(kingCaptured(m)){
+          return { score: 100000 - depth, move:m };
+        }
+        const nb = applyMove(b, m);
+        let res;
+        if(depth === 1){
+          res = { score: evaluate(nb) };
+        } else {
+          res = minimax(nb, depth-1, other, alpha, beta);
+        }
+        if(res.score > bestScore){ bestScore = res.score; best = m; }
+        alpha = Math.max(alpha, bestScore);
+        if(beta <= alpha) break;
+      }
+      return { score: bestScore, move: best };
+    } else {
+      let bestScore = Infinity;
+      for(const m of moves){
+        if(kingCaptured(m)){
+          return { score: -100000 + depth, move:m };
+        }
+        const nb = applyMove(b, m);
+        let res;
+        if(depth === 1){
+          res = { score: evaluate(nb) };
+        } else {
+          res = minimax(nb, depth-1, other, alpha, beta);
+        }
+        if(res.score < bestScore){ bestScore = res.score; best = m; }
+        beta = Math.min(beta, bestScore);
+        if(beta <= alpha) break;
+      }
+      return { score: bestScore, move: best };
+    }
+  }
+
+  function algebraic(r,c){
+    return FILES[c] + (SIZE - r);
+  }
+
+  function notate(b, m){
+    const p = b[m.fr][m.fc];
+    const letter = p.type === 'K' ? 'K' : 'Q';
+    const sep = m.capture ? 'x' : '-';
+    return letter + algebraic(m.fr,m.fc) + sep + algebraic(m.tr,m.tc);
+  }
+
+  function logLine(text){
+    const log = document.getElementById('log');
+    const div = document.createElement('div');
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    while(log.children.length > 200){
+      log.removeChild(log.firstChild);
+    }
+  }
+
+  function setStatus(text, isWin){
+    const el = document.getElementById('status');
+    el.textContent = text;
+    el.classList.toggle('win', !!isWin);
+  }
+
+  function render(){
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+    for(let r=0;r<SIZE;r++){
+      for(let c=0;c<SIZE;c++){
+        const sq = document.createElement('div');
+        sq.className = 'sq ' + (((r+c)%2===0) ? 'light':'dark');
+        if(lastMove){
+          if(lastMove.fr===r && lastMove.fc===c) sq.classList.add('from');
+          if(lastMove.tr===r && lastMove.tc===c) sq.classList.add('to');
+        }
+        const p = board[r][c];
+        if(p){
+          sq.classList.add(p.color==='w' ? 'white-owned' : 'black-owned');
+          const span = document.createElement('span');
+          span.className = 'piece side-' + p.color + (p.type==='K' ? ' king':'');
+          span.textContent = PIECE_GLYPH[p.color+p.type];
+          sq.appendChild(span);
+        }
+        boardEl.appendChild(sq);
+      }
+    }
+    const coords = document.getElementById('coords');
+    coords.innerHTML = FILES.map(f=>`<span>${f}</span>`).join('');
+  }
+
+  function step(){
+    if(gameOver) return;
+    const moves = allMoves(board, turn);
+    if(moves.length === 0){
+      gameOver = true;
+      winner = 'draw';
+      setStatus('NO LEGAL MOVES — DRAW', true);
+      logLine('--- GAME OVER: DRAW (no legal moves) ---');
+      stopTimer();
+      return;
+    }
+    const depth = 2; // two-ply lookahead
+    const result = minimax(board, depth, turn, -Infinity, Infinity);
+    const chosen = result.move || moves[Math.floor(Math.random()*moves.length)];
+
+    const wasKingCapture = kingCaptured(chosen);
+    const noteText = notate(board, chosen);
+    board = applyMove(board, chosen);
+    lastMove = { fr:chosen.fr, fc:chosen.fc, tr:chosen.tr, tc:chosen.tc };
+    moveCount++;
+
+    logLine((turn==='w'?'W':'B') + moveCount + ': ' + noteText);
+    playMoveSound(turn, chosen.capture);
+
+    if(wasKingCapture){
+      gameOver = true;
+      winner = turn;
+      render();
+      setStatus((turn==='w'?'WHITE':'BLACK') + ' WINS — KING CAPTURED', true);
+      logLine('--- GAME OVER: ' + (turn==='w'?'WHITE':'BLACK') + ' WINS ---');
+      playWinFanfare(turn);
+      stopTimer();
+      return;
+    }
+
+    if(moveCount >= 400){
+      gameOver = true;
+      winner = 'draw';
+      render();
+      setStatus('MOVE LIMIT REACHED — DRAW', true);
+      logLine('--- GAME OVER: DRAW (move limit) ---');
+      stopTimer();
+      return;
+    }
+
+    turn = (turn === 'w') ? 'b' : 'w';
+    setStatus((turn==='w'?'WHITE':'BLACK') + ' TO MOVE', false);
+    render();
+  }
+
+  function stopTimer(){
+    if(timer){ clearTimeout(timer); timer = null; }
+  }
+
+  function scheduleNext(){
+    stopTimer();
+    if(!autoplay || gameOver) return;
+    const delay = turbo ? 60 : 850;
+    timer = setTimeout(()=>{
+      step();
+      scheduleNext();
+    }, delay);
+  }
+
+  // ---------- Controls ----------
+  const playBtn = document.getElementById('playBtn');
+  const turboBtn = document.getElementById('turboBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const easypageBtn = document.getElementById('easypageBtn');
+
+  [playBtn, turboBtn, restartBtn, easypageBtn].forEach(btn=>{
+    btn.addEventListener('click', ensureAudio, { once:false });
+  });
+  document.body.addEventListener('click', ensureAudio, { once:true });
+
+  playBtn.addEventListener('click', ()=>{
+    autoplay = !autoplay;
+    playBtn.textContent = autoplay ? '⏸ PAUSE' : '▶ PLAY';
+    playBtn.classList.toggle('active', autoplay);
+    if(autoplay) scheduleNext(); else stopTimer();
+  });
+
+  turboBtn.addEventListener('click', ()=>{
+    turbo = !turbo;
+    turboBtn.textContent = '⚡ TURBO MODE: ' + (turbo ? 'ON':'OFF');
+    turboBtn.classList.toggle('active', turbo);
+    if(autoplay){ scheduleNext(); }
+  });
+
+  restartBtn.addEventListener('click', ()=>{
+    stopTimer();
+    resetGame();
+    autoplay = true;
+    playBtn.textContent = '⏸ PAUSE';
+    playBtn.classList.add('active');
+    scheduleNext();
+  });
+
+  easypageBtn.addEventListener('click', ()=>{
+    window.open('https://easypagex.github.io', '_blank', 'noopener');
+  });
+
+  // ---------- Boot ----------
+  ensureAudio();
+  resetGame();
+  playBtn.classList.add('active');
+  scheduleNext();
+})();
+</script>
+</body>
+</html>
